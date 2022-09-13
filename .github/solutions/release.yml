@@ -2,14 +2,13 @@ name: 📦 Release and Deploy
 on:
   release:
     types: [created]
-
+    
 env:
-  AZ_RESOURCE_GROUP: "RG-AKSCluster" # Name of your Azure resource group
-  AZ_CLUSTER_NAME: "AKS-000" # name of your kubernetes cluster in Azure
+  AZ_RESOURCE_GROUP: "tgrall-demo" # Name of your Azure resource group
+  AZ_CLUSTER_NAME: "tug-kube" # name of your kubernetes cluster in Azure
   IMAGE_NAME: ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
-  IMAGE_NAME_WITH_TAG: ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
-
-
+  IMAGE_NAME_WITH_TAG: ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}    
+  
 jobs:
 
   build_and_publish:
@@ -39,40 +38,45 @@ jobs:
           tags: |
             ${{env.IMAGE_NAME}}
             ${{env.IMAGE_NAME_WITH_TAG}}
-
-
+            
   deploy_to_kubernetes:
-    name: "🌩️ - Deploy to Kubernetes"            
-    needs: build_and_publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+      name: "🌩️ - Deploy to Kubernetes"            
+      needs: build_and_publish
+      runs-on: ubuntu-latest
+      permissions:
+        contents: read
 
-    steps:
+      steps:
 
-      - uses: actions/checkout@v2
+        - uses: actions/checkout@v2
 
-      # login to azure
-      - name: Login to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        # login to azure
+        - name: Login to Azure
+          uses: azure/login@v1
+          with:
+            creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # get kubernetes credentials/context    
-      - name: Get AKS Credentials
-        id: getContext
-        run: |
-          az aks get-credentials --resource-group ${{ env.AZ_RESOURCE_GROUP }} --name ${{ env.AZ_CLUSTER_NAME }} --file $GITHUB_WORKSPACE/kubeconfig
-          echo "KUBECONFIG=$GITHUB_WORKSPACE/kubeconfig" >> $GITHUB_ENV
+        # get kubernetes credentials/context    
+        - name: Get AKS Credentials
+          id: getContext
+          run: |
+            az aks get-credentials --resource-group ${{ env.AZ_RESOURCE_GROUP }} --name ${{ env.AZ_CLUSTER_NAME }} --file $GITHUB_WORKSPACE/kubeconfig
+            echo "KUBECONFIG=$GITHUB_WORKSPACE/kubeconfig" >> $GITHUB_ENV
+        - name: "Escaping Image Name"
+          run: |
+            IMAGE_NAME_ESC=$(echo $IMAGE_NAME_WITH_TAG | sed 's/\//\\\//g')
+            echo "IMAGE_NAME_ESC=$IMAGE_NAME_ESC" >> $GITHUB_ENV
+        - name: "🌩️ - Deploy"
+          run: |
+            sed -i 's/IMAGE_NAME/${{env.IMAGE_NAME_ESC}}/g' kubernetes/deployment.yml
+            kubectl create namespace ${{ github.actor }} --dry-run=client -o json | kubectl apply -f - 
+            kubectl apply -f ./kubernetes/deployment.yml --namespace=${{ github.actor }}
+            kubectl -n  ${{ github.actor }} rollout restart deployment hello-world-node-deployment
+            
+            echo "🕚  - Wait 20s for service deployment"
+            sleep 20s
+            IP_SERVICE=$(kubectl get services -n ${{ github.actor }}  -o json | jq -r '.items[] | select(.metadata.name == "hello-world-node") | .status.loadBalancer?|.ingress[]?|.ip')
+            echo "IP_SERVICE=$IP_SERVICE" >> $GITHUB_ENV
+            echo "🏁 - Service ${{ github.repository }} update in ${{github.actor}} : http://$IP_SERVICE:3000 "            
 
-      - name: "Escaping Image Name"
-        run: |
-          IMAGE_NAME_ESC=$(echo $IMAGE_NAME_WITH_TAG | sed 's/\//\\\//g')
-          echo "IMAGE_NAME_ESC=$IMAGE_NAME_ESC" >> $GITHUB_ENV
-
-      - name: "🌩️ - Deploy"
-        run: |
-          sed -i 's/IMAGE_NAME/${{env.IMAGE_NAME_ESC}}/g' kubernetes/deployment.yml
-          kubectl apply -f ./kubernetes/deployment.yml 
-          echo "🏁 - Application ${{ github.repository }} deployed to kubernetes"
   

@@ -1,15 +1,7 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: workshop
-  labels:
-    name: workshop
 
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: workshop
   name: hello-world-node-deployment
 spec:
   replicas: 1
@@ -32,7 +24,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  namespace: workshop
   name: hello-world-node
 spec:
   selector:
